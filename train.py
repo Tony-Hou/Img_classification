@@ -10,11 +10,12 @@ import os
 import time
 slim = tf.contrib.slim
 
-import numpy as np
+#import numpy as np
 #设置定量的GPU使用量
 config  = tf.ConfigProto()
-config.gpu_options.per_process_gpu_memory_fraction = 0.9
-
+#config.gpu_options.per_process_gpu_memory_fraction = 0.9
+config.gpu_options.allow_growth = True
+#session = tf.Session(config=config)
 # 设置最小的GPU使用量
 """
 config = tf.ConfigProto()
@@ -74,7 +75,7 @@ learning_rate_decay_factor = 0.7
 num_epochs_before_decay = 2
 
 #iteration 
-total_iterations = 0
+
 #============== DATASET LOADING ======================
 #We now create a function that creates a Dataset class which will give us many TFRecord files to feed in the examples into a queue in parallel.
 def get_split(split_name, dataset_dir, file_pattern=file_pattern, file_pattern_for_counting='estate'):
@@ -172,10 +173,6 @@ def load_batch(dataset, batch_size, height=img_height, width=img_width, is_train
 
     #Perform the correct preprocessing for this image depending if it is training or evaluating
     image = inception_preprocessing.preprocess_image(raw_image, height, width, is_training)
-    print(type(label))
-    print(tf.shape(label))
-    print(type(image))
-    print(tf.shape(image))
     #As for the raw images, we just do a simple reshape to batch it up
     image = tf.expand_dims(image, 0)
     """
@@ -195,8 +192,9 @@ def load_batch(dataset, batch_size, height=img_height, width=img_width, is_train
     return image,  label
 
 
-sess = tf.Session()
-    
+#sess = tf.Session()
+
+
         #Create the log directory here. Must be done here otherwise import will activate this unneededly.
 if not os.path.exists(log_dir):
     os.mkdir(log_dir)
@@ -204,6 +202,7 @@ if not os.path.exists(log_dir):
 #Now we start to construct the graph and build our model
 tf.logging.set_verbosity(tf.logging.INFO) #Set the verbosity to INFO level
 dataset = get_split('train', dataset_dir, file_pattern=file_pattern)
+print(dataset.num_samples)
 #First create the dataset and load one batch
 x = tf.placeholder(tf.float32, shape=[None, img_height, img_width,3], name='x')
 #y_true = tf.placeholder(tf.int32, shape=[None, num_classes], name='y_true')
@@ -254,13 +253,14 @@ probabilities = end_points['Predictions']
 accuracy, accuracy_update = tf.contrib.metrics.streaming_accuracy(predictions, y_true)
 metrics_op = tf.group(accuracy_update, probabilities)
 
-sess.run(tf.global_variables_initializer())
+
 
 #Now finally create all the summaries you need to monitor and group them into one summary op.
 tf.summary.scalar('losses/Total_Loss', total_loss)
 tf.summary.scalar('accuracy', accuracy)
 tf.summary.scalar('learning_rate', lr)
 my_summary_op = tf.summary.merge_all()
+
 
 #Now we need to create a training step function that runs both the train_op, metrics_op and updates the global_step concurrently.
 def train_step(sess, train_op, global_step):
@@ -276,19 +276,30 @@ def train_step(sess, train_op, global_step):
     if global_step_count % 10 == 0:
         logging.info('global step %s: loss: %.4f (%.2f sec/step)', global_step_count, total_loss, time_elapsed)
     return total_loss, global_step_count
-
-#Now we create a saver function that actually restores the variables from a checkpoint file in a sess
-saver = tf.train.Saver(variables_to_restore)
-saver.restore(sess, checkpoint_file)
-threads = tf.train.start_queue_runners(session=sess)
-
-
-for i in range(num_steps_per_epoch*num_epochs):
-    image, label = load_batch(dataset, batch_size=batch_size)
-    sess.run(train_op, feed_dict={x: image.eval(session=sess), y_true: label(session=sess)})
-    saver.save(sess,  global_step = global_step)
     
-
+with tf.Session(config=config) as sess:
+    sess.run(tf.global_variables_initializer())
+    #Now we create a saver function that actually restores the variables from a checkpoint file in a sess
+    saver = tf.train.Saver(variables_to_restore)
+    saver.restore(sess, checkpoint_file)
+    
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    
+    for i in range(num_steps_per_epoch*num_epochs):
+        image, label = load_batch(dataset, batch_size=batch_size)
+        print('x shape',tf.shape(x))
+        print('y_true', tf.shape(y_true))
+        print('========================')
+        sess.run(train_op, feed_dict={x: image.eval(session=sess), y_true: label(session=sess)})
+        print('------------------------')
+        print('x shape',tf.shape(x))
+        print('y_true', tf.shape(y_true))
+        print(x.eval())
+        print(y_true.eval())
+        saver.save(sess,  global_step = global_step)
+    coord.request_stop()
+    coord.join(threads)
 
                 
 
